@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>European Table Hockey Championship Map</title>
+
+<!-- Leaflet core (map engine) -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<!-- Typography -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ============================================================
+     BASE / RESET
+     ============================================================ */
+  :root{
+    --color-water:        #d7ebf7;
+    --color-eu-member:    #faedb0;
+    --color-non-eu-europe:#ede4cf;
+    --color-other:        #faf9f4;
+    --color-border:       #2b2b2b;
+    --color-marker-european: #2f6fed;
+    --color-marker-world:    #e0342f;
+    --color-panel-bg:     #ffffff;
+    --color-text:         #26292e;
+    --color-text-subtle:  #6b7280;
+    --font-main: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-family: var(--font-main);
+    background: var(--color-water);
+    overflow: hidden;
+  }
+
+  #map {
+    width: 100vw;
+    height: 100vh;
+    background: var(--color-water);
+  }
+
+  /* Leaflet's default attribution kept, but restyled to feel lighter */
+  .leaflet-control-attribution {
+    font-family: var(--font-main);
+    font-size: 10px;
+    background: rgba(255,255,255,0.75) !important;
+  }
+
+  /* Remove Leaflet's default focus outline flicker on polygons */
+  .leaflet-interactive:focus { outline: none; }
+
+  /* ============================================================
+     COUNTRY LABELS
+     ============================================================ */
+  .country-label {
+    font-family: var(--font-main);
+    font-weight: 600;
+    color: #4a4330;
+    text-shadow:
+      -1px -1px 0 rgba(255,255,255,0.85),
+       1px -1px 0 rgba(255,255,255,0.85),
+      -1px  1px 0 rgba(255,255,255,0.85),
+       1px  1px 0 rgba(255,255,255,0.85);
+    white-space: nowrap;
+    pointer-events: none;
+    text-align: center;
+  }
+
+  /* ============================================================
+     LEGEND PANEL
+     ============================================================ */
+  .legend-panel {
+    background: var(--color-panel-bg);
+    border-radius: 16px;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.08);
+    padding: 18px 20px;
+    font-family: var(--font-main);
+    color: var(--color-text);
+    width: min(13vw, 260px);
+    min-width: 190px;
+    max-height: 26vh;
+    overflow-y: auto;
+  }
+
+  .legend-title {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 12px 0;
+    letter-spacing: 0.02em;
+    color: var(--color-text);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .legend-item:last-child { margin-bottom: 0; }
+
+  .legend-swatch {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    margin-top: 2px;
+  }
+  .legend-swatch.circle { border-radius: 50%; }
+  .legend-swatch.water   { background: var(--color-water); }
+  .legend-swatch.eu-member  { background: var(--color-eu-member); }
+  .legend-swatch.non-eu-europe { background: var(--color-non-eu-europe); }
+  .legend-swatch.other   { background: var(--color-other); border: 1px solid #e5e2d8; }
+  .legend-swatch.marker-european { background: var(--color-marker-european); }
+  .legend-swatch.marker-world    { background: var(--color-marker-world); }
+  .legend-swatch.border  { background: var(--color-border); height: 3px; margin-top: 7px; border-radius: 2px; }
+
+  .legend-text-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--color-text);
+    line-height: 1.3;
+  }
+  .legend-text-desc {
+    font-size: 11.5px;
+    color: var(--color-text-subtle);
+    line-height: 1.35;
+    margin-top: 1px;
+  }
+
+  /* Responsive: shrink legend gracefully on small screens */
+  @media (max-width: 700px) {
+    .legend-panel {
+      width: min(58vw, 230px);
+      padding: 14px 14px;
+      max-height: 40vh;
+    }
+    .legend-title { font-size: 13px; margin-bottom: 8px; }
+    .legend-text-title { font-size: 11.5px; }
+    .legend-text-desc { font-size: 10.5px; }
+    .legend-swatch { width: 12px; height: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<script>
+/* ================================================================
+   CONFIG
+   Central place for tunable constants -> easy to extend later.
+   ================================================================ */
+const CONFIG = {
+  initialCenter: [51.5, 15.5],   // roughly the geographic middle of Europe + margin
+  initialZoom: 4,
+  maxZoom: 8,
+  // Base dataset: world country borders (needed for the North Africa / western
+  // Asia neighbors that should be visible at the edges of the initial view).
+  countriesGeoJsonUrl: "https://cdn.jsdelivr.net/gh/johan/world.geo.json@master/countries.geo.json",
+  // The base dataset predates Kosovo's 2008 independence and draws it as part
+  // of Serbia. This small supplementary file is merged in at runtime so Kosovo
+  // renders as its own country, matching current political boundaries.
+  kosovoGeoJsonUrl: "https://cdn.jsdelivr.net/gh/sdimunzio/countries-geojson@master/kosovo.json",
+
+  colors: {
+    water: "#d7ebf7",
+    euMember: "#faedb0",     // European Union member states
+    nonEuEurope: "#ede4cf",  // European, but not an EU member
+    other: "#faf9f4",
+    border: "#2b2b2b",
+    markerEuropean: "#2f6fed", // European Championship host
+    markerWorld: "#e0342f"     // World Championship host
+  },
+
+  borderWeight: 1,      // constant pixel width, does not scale with zoom (Leaflet default behaviour)
+  markerRadius: 5,      // constant pixel radius, does not scale with zoom
+
+  // Championship host cities. Adding a new one only requires a new entry here.
+  cities: [
+    { name: "Lahr, Germany",     coords: [48.3300, 7.8700],  year: 2026, type: "European" },
+    { name: "Umeå, Sweden",      coords: [63.8258, 20.2630], year: 2025, type: "World" },
+    { name: "Valmiera, Latvia",  coords: [57.5410, 25.4270], year: 2024, type: "European" }
+  ]
+};
+
+/* The 27 European Union member states -> filled with the EU yellow tone.
+   All other European countries (from EUROPEAN_COUNTRIES below) still get
+   labeled, but fall back to the muted non-EU tone instead. */
+const EU_COUNTRIES = new Set([
+  "Austria","Belgium","Bulgaria","Croatia","Cyprus","Czech Republic",
+  "Denmark","Estonia","Finland","France","Germany","Greece","Hungary",
+  "Ireland","Italy","Latvia","Lithuania","Luxembourg","Malta","Netherlands",
+  "Poland","Portugal","Romania","Slovakia","Slovenia","Spain","Sweden"
+]);
+
+/* List of European countries as named in the world.geo.json dataset.
+   Anything not in this list (but still visible on the map) is treated
+   as "outside Europe" and rendered in the near-white tone. */
+const EUROPEAN_COUNTRIES = new Set([
+  "Albania","Andorra","Austria","Belarus","Belgium","Bosnia and Herzegovina",
+  "Bulgaria","Croatia","Cyprus","Czech Republic","Denmark","Estonia",
+  "Finland","France","Germany","Greece","Hungary","Iceland","Ireland",
+  "Italy","Kosovo","Latvia","Liechtenstein","Lithuania","Luxembourg",
+  "Macedonia","Malta","Moldova","Monaco","Montenegro","Netherlands",
+  "Norway","Poland","Portugal","Romania","Russia","San Marino","Serbia",
+  "Slovakia","Slovenia","Spain","Sweden","Switzerland","Ukraine",
+  "United Kingdom","Vatican"
+]);
+
+/* ================================================================
+   MAP INITIALISATION
+   ================================================================ */
+const map = L.map("map", {
+  center: CONFIG.initialCenter,
+  zoom: CONFIG.initialZoom,
+  minZoom: CONFIG.initialZoom,   // cannot zoom out further than the initial overview
+  maxZoom: CONFIG.maxZoom,
+  zoomControl: true,
+  attributionControl: true,
+  worldCopyJump: false,
+  maxBoundsViscosity: 1.0,
+
+  /* ---- Google-Maps-style interaction tuning ---- */
+  zoomSnap: 3,
+  zoomDelta: 0.6,           // how far +/- buttons and keyboard zoom move per press
+  wheelPxPerZoomLevel: 120, // higher = gentler, more gradual mouse-wheel zoom steps
+  wheelDebounceTime: 30,
+  scrollWheelZoom: true,    // zooms toward the cursor position, like Google Maps
+  doubleClickZoom: true,    // double-click/tap to smoothly zoom in one step
+  touchZoom: "center",      // pinch-zoom anchors to the pinch midpoint on mobile
+  inertia: true,            // drag-and-release keeps gliding briefly, then eases out
+  inertiaDeceleration: 3000,
+  inertiaMaxSpeed: Infinity,
+  easeLinearity: 0.2,       // shape of the pan/zoom easing curve
+  zoomAnimation: true,
+  fadeAnimation: true,
+  markerZoomAnimation: true,
+  bounceAtZoomLimits: false // no rubber-band bounce past min/max zoom
+});
+
+// Keep the whole world reachable by panning but discourage endless drift
+map.setMaxBounds([[-85, -60], [85, 95]]);
+
+map.attributionControl.setPrefix(false);
+map.attributionControl.addAttribution("Country boundaries: world.geo.json (public domain)");
+
+/* ================================================================
+   COUNTRY LAYER (fill + borders)
+   ================================================================ */
+function styleForFeature(feature) {
+  const name = feature.properties.name;
+  const fillColor = EU_COUNTRIES.has(name) ? CONFIG.colors.euMember : CONFIG.colors.other;
+  return {
+    fillColor: fillColor,
+    fillOpacity: 1,
+    color: CONFIG.colors.border,
+    weight: CONFIG.borderWeight,   // fixed pixel weight -> constant on screen at all zoom levels
+    opacity: 1
+  };
+}
+
+/* Group to hold the always-on-top label markers, kept separate from the
+   polygon layer so re-styling countries never touches the labels. */
+const labelLayerGroup = L.layerGroup().addTo(map);
+
+function addCountryLabel(feature, layer) {
+  const name = feature.properties.name;
+  if (!EUROPEAN_COUNTRIES.has(name)) return; // only label the requested (European) countries
+
+  let center;
+  try {
+    center = layer.getBounds().getCenter();
+  } catch (e) {
+    return;
+  }
+
+  const label = L.marker(center, {
+    icon: L.divIcon({
+      className: "country-label",
+      html: name,
+      iconSize: null
+    }),
+    interactive: false,
+    keyboard: false
+  });
+
+  label.addTo(labelLayerGroup);
+}
+
+Promise.all([
+  fetch(CONFIG.countriesGeoJsonUrl).then(res => res.json()),
+  fetch(CONFIG.kosovoGeoJsonUrl).then(res => res.json()).catch(() => null)
+])
+  .then(([geojson, kosovo]) => {
+    if (kosovo) {
+      // Normalise its property schema to match the base dataset ({ name }),
+      // then add it as an extra feature so it draws, colors, and labels
+      // exactly like every other country.
+      kosovo.properties = { name: "Kosovo" };
+      geojson.features.push(kosovo);
+    }
+
+    const countryLayer = L.geoJSON(geojson, {
+      style: styleForFeature,
+      onEachFeature: addCountryLabel
+    }).addTo(map);
+
+    // Draw water beneath everything, countries on top, labels above that,
+    // markers above labels.
+    countryLayer.bringToBack();
+    labelLayerGroup.bringToFront();
+    cityMarkerGroup.bringToFront();
+
+    updateLabelVisibility();
+  })
+  .catch(err => {
+    console.error("Failed to load country boundaries:", err);
+  });
+
+/* Show/hide labels slightly based on zoom so the initial overview isn't
+   cluttered with 40+ overlapping names; simple, extendable rule. */
+function updateLabelVisibility() {
+  const zoom = map.getZoom();
+  const el = document.querySelectorAll(".country-label");
+  el.forEach(node => {
+    node.style.fontSize = zoom <= 4 ? "10px" : zoom <= 5 ? "12px" : "14px";
+  });
+}
+map.on("zoomend", updateLabelVisibility);
+
+/* ================================================================
+   CITY MARKERS (fixed pixel size, always solid blue circles)
+   ================================================================ */
+const cityMarkerGroup = L.layerGroup().addTo(map);
+
+CONFIG.cities.forEach(city => {
+  const markerColor = city.type === "World"
+    ? CONFIG.colors.markerWorld
+    : CONFIG.colors.markerEuropean;
+
+  L.circleMarker(city.coords, {
+    radius: CONFIG.markerRadius,   // fixed in screen pixels -> constant size at every zoom level
+    fillColor: markerColor,
+    fillOpacity: 1,
+    color: "#ffffff",
+    weight: 1.5,
+    opacity: 1
+  })
+  .bindTooltip(`${city.name} — ${city.year} ${city.type} Championship`, {
+    direction: "top",
+    offset: [0, -6]
+  })
+  .addTo(cityMarkerGroup);
+});
+
+/* ================================================================
+   LEGEND PANEL (custom Leaflet control, fixed to the screen)
+   ================================================================ */
+const LegendControl = L.Control.extend({
+  options: { position: "topleft" },
+
+  onAdd: function () {
+    const container = L.DomUtil.create("div", "legend-panel");
+
+    // Prevent map drag/zoom when interacting with the legend
+    L.DomEvent.disableClickPropagation(container);
+    L.DomEvent.disableScrollPropagation(container);
+
+    container.innerHTML = `
+      <p class="legend-title">Legend</p>
+
+      <div class="legend-item">
+        <div class="legend-swatch circle marker-european"></div>
+        <div>
+          <div class="legend-text-title">Blue circles</div>
+          <div class="legend-text-desc">European Championship host cities (Lahr 2026, Valmiera 2024).</div>
+        </div>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-swatch circle marker-world"></div>
+        <div>
+          <div class="legend-text-title">Red circle</div>
+          <div class="legend-text-desc">World Championship host city (Umeå 2025).</div>
+        </div>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-swatch water"></div>
+        <div>
+          <div class="legend-text-title">Light blue</div>
+          <div class="legend-text-desc">Water — oceans, seas, lakes and rivers.</div>
+        </div>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-swatch eu-member"></div>
+        <div>
+          <div class="legend-text-title">Light yellow</div>
+          <div class="legend-text-desc">European Union member states.</div>
+        </div>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-swatch other"></div>
+        <div>
+          <div class="legend-text-title">Very light yellow</div>
+          <div class="legend-text-desc">All other countries, in Europe or beyond.</div>
+        </div>
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-swatch border"></div>
+        <div>
+          <div class="legend-text-title">Thin dark gray lines</div>
+          <div class="legend-text-desc">International borders between countries.</div>
+        </div>
+      </div>
+    `;
+    return container;
+  }
+});
+
+map.addControl(new LegendControl());
+</script>
+</body>
+</html>
